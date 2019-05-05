@@ -24,6 +24,7 @@ import (
 	"github.com/spiffe/spire/pkg/common/health"
 	"github.com/spiffe/spire/pkg/common/idutil"
 	"github.com/spiffe/spire/pkg/common/log"
+	"github.com/spiffe/spire/pkg/common/policy"
 	"github.com/spiffe/spire/pkg/common/telemetry"
 	"github.com/spiffe/spire/pkg/common/util"
 	"github.com/spiffe/spire/pkg/server"
@@ -79,6 +80,7 @@ type serverConfig struct {
 	SocketPath     string             `hcl:"socket_path"`
 	TrustDomain    string             `hcl:"trust_domain"`
 
+	PolicyEngine        *policy.EngineConfig `hcl:"policy_engine"`
 	ConfigPath string
 	ExpandEnv  bool
 
@@ -520,6 +522,8 @@ func NewServerConfig(c *Config, logOptions []log.Option, allowUnknownConfig bool
 		}
 		sc.CacheReloadInterval = interval
 	}
+
+	sc.PolicyEngineConfig = c.Server.PolicyEngine
 
 	return sc, nil
 }
