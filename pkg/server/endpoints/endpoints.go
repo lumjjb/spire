@@ -26,6 +26,7 @@ import (
 	entryv1 "github.com/spiffe/spire-api-sdk/proto/spire/api/server/entry/v1"
 	svidv1 "github.com/spiffe/spire-api-sdk/proto/spire/api/server/svid/v1"
 	"github.com/spiffe/spire/pkg/common/auth"
+	"github.com/spiffe/spire/pkg/common/policy"
 	"github.com/spiffe/spire/pkg/common/telemetry"
 	"github.com/spiffe/spire/pkg/common/util"
 	"github.com/spiffe/spire/pkg/server/api/middleware"
@@ -69,6 +70,7 @@ type Endpoints struct {
 	Metrics                      telemetry.Metrics
 	RateLimit                    RateLimitConfig
 	EntryFetcherCacheRebuildTask func(context.Context) error
+	PolicyEngine                 *policy.Engine
 }
 
 type OldAPIServers struct {
@@ -116,6 +118,7 @@ func New(ctx context.Context, c Config) (*Endpoints, error) {
 		return nil, err
 	}
 
+	fmt.Println("LUMJB: In endpoints.endpoints with policy engine", c.PolicyEngine)
 	return &Endpoints{
 		OldAPIServers:                oldAPIServers,
 		TCPAddr:                      c.TCPAddr,
@@ -129,6 +132,7 @@ func New(ctx context.Context, c Config) (*Endpoints, error) {
 		Metrics:                      c.Metrics,
 		RateLimit:                    c.RateLimit,
 		EntryFetcherCacheRebuildTask: ef.RunRebuildCacheTask,
+		PolicyEngine:                 c.PolicyEngine,
 	}, nil
 }
 
@@ -138,7 +142,7 @@ func New(ctx context.Context, c Config) (*Endpoints, error) {
 // server is returned.
 func (e *Endpoints) ListenAndServe(ctx context.Context) error {
 	e.Log.Debug("Initializing API endpoints")
-
+	// LUMJJB: Endpoints needs policy Engine to pass to interceptors
 	unaryInterceptor, streamInterceptor := e.makeInterceptors()
 
 	tcpServer := e.createTCPServer(ctx, unaryInterceptor, streamInterceptor)
@@ -333,7 +337,8 @@ func (e *Endpoints) makeInterceptors() (grpc.UnaryServerInterceptor, grpc.Stream
 
 	oldUnary, oldStream := wrapWithDeprecationLogging(log, auth.UnaryAuthorizeCall, auth.StreamAuthorizeCall)
 
-	newUnary, newStream := middleware.Interceptors(Middleware(log, e.Metrics, e.DataStore, clock.New(), e.RateLimit))
+	// LUMJJB :  add policy engine as input here
+	newUnary, newStream := middleware.Interceptors(Middleware(log, e.Metrics, e.DataStore, clock.New(), e.RateLimit, e.PolicyEngine))
 
 	return unaryInterceptorMux(oldUnary, newUnary), streamInterceptorMux(oldStream, newStream)
 }

@@ -41,11 +41,11 @@ const defaultListEntriesPageSize = 50
 type Handler struct {
 	registration.UnsafeRegistrationServer
 
-	Log         logrus.FieldLogger
-	Metrics     telemetry.Metrics
-	Catalog     catalog.Catalog
-	TrustDomain spiffeid.TrustDomain
-	ServerCA    ca.ServerCA
+	Log          logrus.FieldLogger
+	Metrics      telemetry.Metrics
+	Catalog      catalog.Catalog
+	TrustDomain  spiffeid.TrustDomain
+	ServerCA     ca.ServerCA
 	PolicyEngine *policy.Engine
 }
 
@@ -832,6 +832,7 @@ func (h *Handler) prepareRegistrationEntry(entry *common.RegistrationEntry, forU
 
 func (h *Handler) AuthorizeCall(ctx context.Context, req interface{}, fullMethod string) (_ context.Context, err error) {
 	// For the time being, authorization is not per-method. In other words, all or nothing.
+	fmt.Println("In AuthorizeCall")
 	counter := telemetry_registrationapi.StartAuthorizeCall(h.Metrics, fullMethod)
 	defer counter.Done(&err)
 	log := h.Log.WithField(telemetry.Method, fullMethod)
@@ -878,6 +879,8 @@ func getSpiffeIDFromCert(cert *x509.Certificate) (string, error) {
 }
 
 func authorizeCaller(ctx context.Context, ds datastore.DataStore, policyEngine *policy.Engine, req interface{}, fullMethod string) (spiffeID string, err error) {
+	fmt.Println("authorizeCaller")
+
 	ctxPeer, ok := peer.FromContext(ctx)
 	if !ok {
 		return "", status.Error(codes.PermissionDenied, "no peer information for caller")
@@ -904,33 +907,40 @@ func authorizeCaller(ctx context.Context, ds datastore.DataStore, policyEngine *
 		// The caller came over UDS and is therefore authorized but does not
 		// provide a spiffeID. The file permissions on the UDS are restricted to
 		// processes belonging to the same user or group as the server.
-		return "", nil
+		fmt.Println("in UDS auth")
+
 	default:
 		// The caller came over an unknown transport
 		return "", status.Errorf(codes.PermissionDenied, "unsupported peer auth info type (%T)", authInfo)
 	}
 
-	resp, err := ds.ListRegistrationEntries(ctx, &datastore.ListRegistrationEntriesRequest{
-		BySpiffeID: spiffeID,
-	})
-	if err != nil {
-		return "", err
-	}
+	if spiffeID == "" {
+		if err := allowRequest(ctx, policyEngine, "UDS", req, fullMethod); err != nil {
+			return "", nil
+		}
+	} else {
+		resp, err := ds.ListRegistrationEntries(ctx, &datastore.ListRegistrationEntriesRequest{
+			BySpiffeID: spiffeID,
+		})
+		if err != nil {
+			return "", err
+		}
 
-	for _, entry := range resp.Entries {
-		if entry.Admin {
+		for _, entry := range resp.Entries {
+			if entry.Admin {
+				return spiffeID, nil
+			}
+		}
+		if err := allowRequest(ctx, policyEngine, spiffeID, req, fullMethod); err != nil {
 			return spiffeID, nil
 		}
-	}
-
-	if err := allowRequest(ctx, policyEngine, spiffeID, req, fullMethod); err != nil {
-		return spiffeID, nil
 	}
 
 	return "", status.Errorf(codes.PermissionDenied, "SPIFFE ID %q is not authorized", spiffeID)
 }
 
 func allowRequest(ctx context.Context, policyEngine *policy.Engine, caller string, req interface{}, fullMethod string) error {
+	fmt.Println("allowRequest")
 	// TODO: remove this
 	if policyEngine == nil {
 		return nil
@@ -940,11 +950,11 @@ func allowRequest(ctx context.Context, policyEngine *policy.Engine, caller strin
 		FullMethod: fullMethod,
 		Req:        req,
 	}
-	allow, err := policyEngine.IsAllowed(ctx, input)
+	result, err := policyEngine.Eval(ctx, input)
 	if err != nil {
 		return err
 	}
-	if !allow {
+	if !result.Allow {
 		return errors.New("not authorized")
 	}
 

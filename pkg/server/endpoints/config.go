@@ -79,7 +79,7 @@ func (c *Config) makeOldAPIServers() OldAPIServers {
 		Catalog:      c.Catalog,
 		TrustDomain:  c.TrustDomain,
 		ServerCA:     c.ServerCA,
-        PolicyEngine: c.PolicyEngine,
+		PolicyEngine: c.PolicyEngine,
 	}
 
 	return OldAPIServers{

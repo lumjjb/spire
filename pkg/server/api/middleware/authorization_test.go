@@ -184,6 +184,6 @@ func (fn authorizerFn) Name() string {
 	return "fake"
 }
 
-func (fn authorizerFn) AuthorizeCaller(ctx context.Context) (context.Context, error) {
+func (fn authorizerFn) AuthorizeCaller(ctx context.Context, req interface{}) (context.Context, error) {
 	return fn(ctx)
 }

@@ -2,7 +2,9 @@ package policy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 
@@ -36,6 +38,27 @@ type Input struct {
 	// protobuf request object with fields that are serializable as JSON,
 	// since they will be used in policy definitions.
 	Req interface{} `json:"req"`
+
+	// Admin represents the admin flag on a caller SVID
+	Admin bool `json:"admin"`
+
+	// Local represents if it is a local UDS socket call
+	Local bool `json:"local"`
+
+	// Downstream represents if caller is from downstream
+	Downstream bool `json:"downstream"`
+
+	// Agent represents if caller is an agent
+	Agent bool `json:"agent"`
+}
+
+type Result struct {
+	Allow             bool `json:"allow"`
+	Pass              bool `json:"pass"`
+	AllowIfAdmin      bool `json:"allow_if_admin"`
+	AllowIfLocal      bool `json:"allow_if_local"`
+	AllowIfDownstream bool `json:"allow_if_downstream"`
+	AllowIfAgent      bool `json:"allow_if_agent"`
 }
 
 // NewEngine returns a new policy engine.
@@ -56,7 +79,7 @@ func NewEngine(cfg *EngineConfig) (*Engine, error) {
 	store := inmem.NewFromReader(storefile)
 
 	rego := rego.New(
-		rego.Query("data.spire.allow"),
+		rego.Query("data.spire.result"),
 		rego.Package(`spire`),
 		rego.Module("spire.rego", string(module)),
 		rego.Store(store),
@@ -70,16 +93,56 @@ func NewEngine(cfg *EngineConfig) (*Engine, error) {
 	}, nil
 }
 
-// IsAllowed determins whether access should be allowed on a resource.
-func (e *Engine) IsAllowed(ctx context.Context, input Input) (bool, error) {
+// Eval determines whether access should be allowed on a resource.
+func (e *Engine) Eval(ctx context.Context, input Input) (result Result, err error) {
 	rs, err := e.rego.Rego(rego.Input(input)).Eval(ctx)
 	if err != nil {
-		return false, err
+		return result, err
 	}
 
 	// TODO(tjulian): figure this out
 	if len(rs) == 0 || len(rs[0].Expressions) == 0 {
-		return false, errors.New("policy: no matching policies found")
+		return result, errors.New("policy: no matching policies found")
 	}
-	return rs[0].Expressions[0].Value.(bool), nil
+
+	fmt.Printf("LUMJJB: %+v \n", rs[0])
+
+	b, _ := json.Marshal(input)
+	fmt.Printf("INPUT: \n\n%v\n\n", string(b))
+
+	exp := rs[0].Expressions[0]
+	resultMap := exp.Value.(map[string]interface{})
+
+	var ok bool
+	result.Allow, ok = resultMap["allow"].(bool)
+	if !ok {
+		return result, errors.New("policy: result did not contain \"allow\" bool value")
+	}
+
+	result.Pass, ok = resultMap["pass"].(bool)
+	if !ok {
+		return result, errors.New("policy: result did not contain \"pass\" bool value")
+	}
+
+	result.AllowIfAdmin, ok = resultMap["allow_if_admin"].(bool)
+	if !ok {
+		return result, errors.New("policy: result did not contain \"allow_if_admin\" bool value")
+	}
+
+	result.AllowIfLocal, ok = resultMap["allow_if_local"].(bool)
+	if !ok {
+		return result, errors.New("policy: result did not contain \"allow_if_local\" bool value")
+	}
+
+	result.AllowIfDownstream, ok = resultMap["allow_if_downstream"].(bool)
+	if !ok {
+		return result, errors.New("policy: result did not contain \"allow_if_downstream\" bool value")
+	}
+
+	result.AllowIfAgent, ok = resultMap["allow_if_agent"].(bool)
+	if !ok {
+		return result, errors.New("policy: result did not contain \"allow_if_agent\" bool value")
+	}
+
+	return result, nil
 }
